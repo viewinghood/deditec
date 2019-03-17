@@ -187,7 +187,7 @@ class Delib(object):
             pass
 
     # RO-USB-16*A/D analoge Eingabe-Funktionen mit 16-Bit
-    def analogAdSetMode(self,Channel,Mode, Debug=0):
+    def analogAdSetMode(self, Channel: c_ulong, Mode: c_ulong, Debug: int = 0) -> None:
         """
        Dieser Befehl konfiguriert den Spannungsbereich für einen A/D Wandler.
        Return: Keiner.
