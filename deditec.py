@@ -941,7 +941,7 @@ class Delib(object):
         if Width == None or Width == 48:
             # python int is big enough
             # gives the register map back
-            # ‭0100000010010000 000000000000000000000000111111111111111111111110‬
+            # 0100000010010000 000000000000000000000000111111111111111111111110
             # register        - here the counter: you must mask! 
             value = self.bib.DapiCnt48CounterGet48(self.handle, Channel)
         elif Width == 32:
