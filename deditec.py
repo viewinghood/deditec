@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Aug 14 10:17:52 2017
-1. time git 17.03.2019 (inital)
-2. deposited in try/deditec for public
-3. wrapper extended to Ethernet (and USB) interface
-4. more functions: counter, outputs, ... 
+1. time git 17.03.2019
+2. deposited in try/ipe for further development
 
 @author: Richard Heming
 Treiber und Wrapper-Funktionen für DELIB (WIN10 tested)
@@ -13,6 +11,14 @@ Treiber und Wrapper-Funktionen für DELIB (WIN10 tested)
 Annotations for functions
 https://stackoverflow.com/questions/38286718/what-does-def-main-none-do
 
+Version
+1.2 (09.12.2024)
+- error counter48GetCount(Startchannel, Width=32) musste mit Width=32 augerufen werden!
+- Fehler wird jetzt durchgegeben, wenn kein Netzwerkkabel angeschlossen! (l. 248)
+- Miniänderung jetzt bei DAsetVolt usw.
+- try to load the linux .so libs...
+- try the command DapiOpenModuleEx - this works for the linux .so lib!
+- self. is missing in line 417
 """
 import sys, os
 #import datetime
@@ -25,14 +31,19 @@ try:
 except ImportError:
     print("Hm, cannot find the ctypes?! Please check with Python pip first!")
     sys.exit(1)
-if os.name=='nt': 
-    try:
-        bib = CDLL("delib64")
-    except OSError:
-        print("Hm, cannot find the DELIB64.DLL. Please install driver first!")
-        sys.exit(1)
-        
-DRIVER_NUM = 0 # first driver/ instrument 
+# if os.name=='nt': 
+#     try:
+#         bib = CDLL("delib64")
+#     except OSError:
+#         print("Hm, cannot find the DELIB64.DLL. Please install driver first!")
+#         sys.exit(1)
+# elif os.name=='posix': # linux!
+#     try:
+#         bib = CDLL("/home/ipe/deditec/delib-sources/delib/lib/build_x64/old_delib.so")
+#     except OSError:
+#         print("Hm, cannot find the linux .so library. Please look for the driver!")
+#         sys.exit(1)        
+# DRIVER_NUM = 0 # first driver/ instrument 
 
 class Delib(object):
     """
@@ -171,14 +182,27 @@ class Delib(object):
     DAPI_ERR_NONE = 0
 
 
-    def __init__(self, Interface="USB", Number=DRIVER_NUM):
+    def __init__(self, Interface="USB", Number=0):
         """
         Initialising  of *delib64.dll* (WIN10)
             a 64-bit driver is expected.
             Number is the digit when more than one Interface of a Kind
             is configured..!
         """
-        self.bib = CDLL("delib64") # this will NOT fail...
+        # self.bib = CDLL("delib64") # this will NOT fail...
+        if os.name=='nt': 
+            try:
+                self.bib = CDLL("delib64")
+            except OSError:
+                print("Hm, cannot find the DELIB64.DLL. Please install driver first!")
+                sys.exit(1)
+        elif os.name=='posix': # linux!
+            try:
+                # lib compiled from "old" sources derived from "ethernet_sample.c"
+                self.bib = CDLL("/home/ipe/deditec/delib-sources/delib/lib/build_x64/old_delib.so")
+            except OSError:
+                print("Hm, cannot find the linux .so library. Please look for the driver!")
+                sys.exit(1)         
         self.interface = Interface
         self.number = 0 #Number
         self.handle = 0
@@ -215,7 +239,7 @@ class Delib(object):
         # ppy doc 3.7: # c_char_p is a pointer to a string
         # but we cannot easyly convert structure to char *
         ##buffer = EX_BUFFER( b'192.168.178.25', 500, 9912 ) # make it! @home
-        buffer = pointer(EX_BUFFER( b'192.168.178.25', 500, 9912 ) )# make it!
+        buffer = pointer(EX_BUFFER( b'192.168.0.10', 1500, 9912 ) )# make it!
     
         self.interface = Interface
 
@@ -231,18 +255,20 @@ class Delib(object):
         elif self.interface == self.RO_ETH_LC: # low cost version has own id!
             try:
                 ## self.handle = 0 # for testing ONLY!
-                #self.handle = self.bib.DapiOpenModuleEx(self.RO_ETH_LC, self.number,
-                #                            buffer, 0)      
+                self.handle = self.bib.DapiOpenModuleEx(self.RO_ETH_LC, self.number,
+                                            buffer, 0)      
                 # funktioniert!
-                self.handle = self.bib.DapiOpenModule(self.interface, self.number)
+                #self.handle = self.bib.DapiOpenModule(self.interface, self.number)
                 if self.handle == 0:
                     raise ValueError
             except ValueError: #self.handle == 0:
                 print("Cannot OPEN the DediTec/LC with Ethernet!", 
                       "\n Check first IP-Address in DELIB-Config!",
                       "\nthen check also TP-Cables to Module!")
-                print("das handle ist: ", self.handle)
-                sys.exit(1)  # RO-Series only..!                
+                print("No handle available: ", self.handle)
+                print("\n Did you install the driver?!")
+                raise
+                #sys.exit(1)  # RO-Series only..!                
         elif self.interface == self.RO_ETH:
             try:
                 self.handle = self.bib.DapiOpenModuleEx(self.RO_ETH, self.number,
@@ -294,9 +320,10 @@ class Delib(object):
             init = self.bib.DapiCloseModule(self.handle)
             
             print("Module closed! Error: ", init )
-        except OSError as err:
-            print("There was no module to close?!!\n" \
-                  "Message:", err.args)
+        except (OSError, TypeError):
+            print("There was no module to close...")           
+#            print("There was no module to close?!!\n" \
+#                  "Message:", err.args)
             
     def showModuleConfig(self):
         """
@@ -384,7 +411,7 @@ class Delib(object):
         self.bib.DapiGetLastErrorText.restype = c_ulong
         msg = create_string_buffer(500)
         #print("wir haben diese Nachricht:",self.msg,"Länge:",sizeof(self.msg))
-        error = bib.DapiGetLastErrorText(msg,sizeof(msg))
+        error = self.bib.DapiGetLastErrorText(msg,sizeof(msg))
         text = msg.value.decode()  # was byte-string b'....
         #print(str(self.msg.value))
         if error != self.DAPI_ERR_NONE:
@@ -432,7 +459,7 @@ class Delib(object):
         self.bib.DapiADSetMode.argtypes = [c_ulong, c_ulong, c_ulong]
         self.bib.DapiADSetMode.restype = None # void
         self.bib.DapiADSetMode(self.handle, Channel, Mode)
-        print("Channel",Channel,"set.")
+        print("AD Channel",Channel,"set.")
         if Debug == 1:        
             self.lastError()
             self.lastErrorText()
@@ -610,7 +637,7 @@ class Delib(object):
         self.bib.DapiDASetMode.argtypes = [c_ulong, c_ulong, c_ulong]
         self.bib.DapiDASetMode.restype = None # void
         self.bib.DapiDASetMode(self.handle, Channel, Mode)
-        print("Channel",Channel,"set.")
+        print("DA Channel",Channel,"set.")
         if Debug == 1:        
             self.lastError()
             self.lastErrorText()
@@ -625,7 +652,7 @@ class Delib(object):
         self.bib.DapiDAGetMode.restype = c_ulong
         mode = self.bib.DapiDAGetMode(self.handle, Channel)
         if Debug == 1:
-            print("D/A Channel",Channel,"read. Mode is",mode)
+            print("DA Channel",Channel,"read. Mode is",mode)
             self.lastError()
             self.lastErrorText()
         return(mode)
@@ -642,7 +669,7 @@ class Delib(object):
             print("D/A Channel",Channel,"set. Voltage is",Voltage)
             self.lastError()
             self.lastErrorText()
-        #return(voltage)
+        #return(print(str(Voltage)+'V')) # hier muss noch gerundet werden
 
     def analogDaSetDigit(self, Channel, Digit, Debug=0):
         """
@@ -878,10 +905,12 @@ class Delib(object):
             self.bib.DapiSpecialCommand(self.handle, \
                     self.DAPI_SPECIAL_CMD_CNT48, \
                        self.DAPI_SPECIAL_CNT48_LATCH_GROUP8, ch, 0 )
-            print("Latched:", ch, "-",ch+7 )
+            # print("Latched:", ch, "-",ch+7 )
                 #
         if Debug == 1:  
             #self.counter48AllReset("All", Debug=1) 
+            print("Latched:", ch, "-",ch+7 )
+             # Debug=1 hier ist Blödsinn!
             return( { Startchannel:self.counter48GetCount(Startchannel, Width=32, Debug=1)  \
                       for Startchannel in range(Startchannel,Stopchannel+1)} )
             
@@ -893,7 +922,7 @@ class Delib(object):
             #return( list(self.analogGetVolt(0x8000+Startchannel) \
                       #for Startchannel in range(Startchannel,Stopchannel+1)) )
             # I like dicts ;-)
-            return( { Startchannel:self.counter48GetCount(Startchannel) \
+            return( { Startchannel:self.counter48GetCount(Startchannel, Width=32) \
                       for Startchannel in range(Startchannel,Stopchannel+1)})
                 
     def counter48GetCount(self, Channel, Width=None, Debug=0):
@@ -924,7 +953,7 @@ class Delib(object):
             return(1)  
 
         if Debug == 1:       
-            return( print("Counter ", Channel,":",value) )
+            return( print("Counter ", Channel,":",value))
         else:
             return( value)
         
@@ -963,10 +992,11 @@ class Delib(object):
                 self.bib.DapiSpecialCommand(self.handle, \
                                         self.DAPI_SPECIAL_CMD_CNT48, \
                                 self.DAPI_SPECIAL_CNT48_RESET_GROUP8, ch, 0 )           
-                print("Reset:", ch, "-",ch+7 )
-            return( 0)
+                # print("Reset:", ch, "-",ch+7 )
+                ret = 'Reset:' + str(ch) + '-' + str(ch+7)
+            return( ret )
         else:
-            print("CNT8 reset...")
+            # print("CNT8 reset...")
             for _, ch in enumerate(ch_range):
                 self.bib.DapiSpecialCommand(self.handle, \
                                             self.DAPI_SPECIAL_CMD_CNT48, \
@@ -1158,6 +1188,21 @@ class Delib(object):
         
 if __name__ == "__main__": # if imported as module, don't test it..
         
+    import logging as log
+    formatter = '%(asctime)s.%(msecs)03d %(levelname)s - %(funcName)s: %(message)s'
+    date_form = '%H:%M:%S'
+    
+    #logfile = ''
+#    log_dir = os.path.join(os.path.normpath(os.environ['USERPROFILE'] + os.sep ), 'logs')
+#    if not os.path.exists(log_dir):
+#        os.makedirs(log_dir)                                                       
+#    logfile = 'ipe-writer-log.txt'
+#    logfile = os.path.join(log_dir, logfile)
+    log.basicConfig(
+    level=log.INFO,
+    format=formatter, 
+    datefmt=date_form, )
+    
     delib = Delib(Interface='ETH_LC') # name of the class
     #delib = Delib(Interface='USB') # name of the class
     #delib.createModule(delib.RO_ETH)
@@ -1177,7 +1222,7 @@ if __name__ == "__main__": # if imported as module, don't test it..
     # delib.showModuleConfig()
     # delib.analogAdSetMode(15,delib.DAPI_ADDA_MODE_BIPOL_10V)
     # delib.analogAdGetMode(15)
-    # delib.analogAdGetVolt(1)
+#    print('AD1= ',delib.analogAdGetVolt(1) ) # Spannung in mV
     # voltslist = delib.analogAdGetMultiple(0,10,0)
     # print(voltslist)
     # voltslist = delib.analogAdGetMultiple(0,10,1)
@@ -1185,12 +1230,32 @@ if __name__ == "__main__": # if imported as module, don't test it..
     # print(voltslist[0])
     # print(voltslist[9])
     # print("##### digital stuff ####")
-    # delib.analogDaTimeoutOn(1000,0,1)
-    # delib.analogDaTimeoutStatus(1)
+    delib.analogDaSetMode(0,delib.DAPI_ADDA_MODE_UNIPOL_10V,Debug=1)
+    delib.analogDaSetMode(1,delib.DAPI_ADDA_MODE_UNIPOL_10V,Debug=1)
+    delib.analogDaSetMode(2,delib.DAPI_ADDA_MODE_UNIPOL_10V,Debug=1)
+    delib.analogDaSetMode(3,delib.DAPI_ADDA_MODE_UNIPOL_10V,Debug=1)
+    delib.analogDaSetMode(4,delib.DAPI_ADDA_MODE_UNIPOL_10V,Debug=1)
+    delib.analogDaSetMode(5,delib.DAPI_ADDA_MODE_UNIPOL_10V,Debug=1) 
+    delib.analogDaGetMode(0, Debug=1)
+    delib.analogDaGetMode(1, Debug=1)
+    delib.analogDaGetMode(2, Debug=1)
+    delib.analogDaGetMode(3, Debug=1)
+    delib.analogDaGetMode(4, Debug=1)
+    delib.analogDaGetMode(5, Debug=1)
+    delib.analogDaTimeoutOn(10,0,1)
+    delib.analogDaTimeoutStatus(1)
     # delib.analogDaSetMode(1,delib.DAPI_ADDA_MODE_UNIPOL_5V)
-    # delib.analogDaSetVolt(1,0.05   ,1)
+    delib.analogDaSetVolt(0,1.0   ,0)
+    delib.analogDaSetVolt(1,1.1   ,0)
+    delib.analogDaSetVolt(2,1.2   ,0)
+    delib.analogDaSetVolt(3,1.3   ,0)
+    delib.analogDaSetVolt(4,1.4   ,0)
+    delib.analogDaSetVolt(5,1.5   ,0)
+    delib.analogDaSetVolt(5,1.6   ,0)
+
+    delib.analogDaTimeoutOff(1)
     # #delib.analogDaSetZero(1, None,1)
-    # delib.analogDaSetZero(5, 7,1)
+    #delib.analogDaSetZero(0, 3,1)
     # #delib.analogDaSaveVolts(11,None,1)
     # delib.analogDaGetMode(1,1) # Bipolar 10V...
     
@@ -1211,13 +1276,16 @@ if __name__ == "__main__": # if imported as module, don't test it..
         # -> also 8s for 8192 digits written...gives 977us/digit..YES!!
     print(delib.counter48ModeRead(1))
     delib.counter48SetMultiple(0,15, Debug=0 )
-    print("individual counter read:", delib.counter48ModeRead(1) ) 
+    print("individual counter read:", delib.counter48ModeRead(1) )
+    print('?!', delib.counter48GetCount(0,Width=32, Debug=0))
     delib.lastError()
-    delib.lastErrorText()   
-    delib.counter48AllReset("Low", Debug=1)
-    #time.sleep(1)
-    delib.counter48LatchAll(Debug=1)
-    delib.counter48AllReset("All", Debug=1) 
+    delib.lastErrorText()
+    print('Latch all',delib.counter48LatchAll('Low', Debug=0)) # debug=1 ist Blödsinn, gibt leeres (none) dict!
+    #time.sleep(0.5)
+    print(' Reset - 4s delay',delib.counter48AllReset("Low", Debug=1) )
+    #time.sleep(4)
+    print('Latch all',delib.counter48LatchAll('Low',Debug=0))
+    #delib.counter48AllReset("All", Debug=1) 
     #delib.counter48LatchAll(Debug=1)    
     delib.lastError()
     delib.lastErrorText() 
@@ -1248,7 +1316,7 @@ if __name__ == "__main__": # if imported as module, don't test it..
     
     
 ### Counter Test with Period on ch0 = Kanal 1 on the frontpanel...
-
+# In [28]: runfile('E:/WinPython/notebooks/richard/ipe/deditec.py', wdir='E:/WinPython/notebooks/richard/ipe')
 # DELIB-Treiber Version: (hex)  0x235
 # init debug! Handle is:  1209474
 
@@ -1303,3 +1371,18 @@ if __name__ == "__main__": # if imported as module, don't test it..
 # Counter  15 : 0
 # Reset: 0 - 7
 # Module closed! Error:  None
+
+
+# erstes Modul
+# Uni
+# 00:C0:D5:02:08:83
+# 192.168.0.10
+# 255.255.255.0
+# 192.168.0.254
+# 9912
+
+# @home:
+# nur wichtig: PIN 1 auf OFF (DHCP an)     
+    
+# 1. DT Module Config!! -->Check! Eventuell wieder auf DHCP = OFF stellen
+# 2. DELIB Configuration Utility!
