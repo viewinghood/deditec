@@ -1,0 +1,12 @@
+### DRIVER Deditec for linux ###
+################################
+
+#file:
+delib_eth_so.zip
+
+# dies ist ein Zip-Verzeichnis, in dem die
+# shared library liegt und auch das c-Programm
+# zum kompilieren des so-Files!
+
+# he 02/2025
+

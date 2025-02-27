@@ -12,7 +12,7 @@ Annotations for functions
 https://stackoverflow.com/questions/38286718/what-does-def-main-none-do
 
 Version
-1.2 (09.12.2024)
+1.3 (21.01.2025)
 - error counter48GetCount(Startchannel, Width=32) musste mit Width=32 augerufen werden!
 - Fehler wird jetzt durchgegeben, wenn kein Netzwerkkabel angeschlossen! (l. 248)
 - Miniänderung jetzt bei DAsetVolt usw.
@@ -20,7 +20,7 @@ Version
 - try the command DapiOpenModuleEx - this works for the linux .so lib!
 - self. is missing in line 417
 """
-import sys, os
+import sys, os, os.path
 #import datetime
 import time
 
@@ -31,6 +31,14 @@ try:
 except ImportError:
     print("Hm, cannot find the ctypes?! Please check with Python pip first!")
     sys.exit(1)
+
+
+if os.name=='posix': # linux!
+    try:
+        sublib_so = 'deditec/samples/delib_eth_so/delib_eth.so'
+        lib_dir = os.path.join(os.path.normpath(os.environ['HOME'] + os.sep ), sublib_so)
+    except OSError:
+        print("Hm, cannot find the LINUX64 'HOME' var?!")
 # if os.name=='nt': 
 #     try:
 #         bib = CDLL("delib64")
@@ -39,7 +47,11 @@ except ImportError:
 #         sys.exit(1)
 # elif os.name=='posix': # linux!
 #     try:
-#         bib = CDLL("/home/ipe/deditec/delib-sources/delib/lib/build_x64/old_delib.so")
+#         bib = CDLL("/home/ipe/deditec/delib-sources/delib/lib/build_x64/lib_hse_old_delib.so")
+        
+#         #bib = CDLL("/home/ipe/deditec/delib-sources/delib/lib_hse_delib.so")
+#         #bib = CDLL("/home/ipe/writer/lib_hse_delib.so")
+#         #bib = CDLL("/usr/local/lib/lib_hse_delib.so")
 #     except OSError:
 #         print("Hm, cannot find the linux .so library. Please look for the driver!")
 #         sys.exit(1)        
@@ -198,8 +210,7 @@ class Delib(object):
                 sys.exit(1)
         elif os.name=='posix': # linux!
             try:
-                # lib compiled from "old" sources derived from "ethernet_sample.c"
-                self.bib = CDLL("/home/ipe/deditec/delib-sources/delib/lib/build_x64/old_delib.so")
+                self.bib = CDLL( lib_dir)
             except OSError:
                 print("Hm, cannot find the linux .so library. Please look for the driver!")
                 sys.exit(1)         
@@ -238,7 +249,7 @@ class Delib(object):
         self.bib.DapiOpenModuleEx.restype = c_ulong
         # ppy doc 3.7: # c_char_p is a pointer to a string
         # but we cannot easyly convert structure to char *
-        ##buffer = EX_BUFFER( b'192.168.178.25', 500, 9912 ) # make it! @home
+        ##buffer = EX_BUFFER( b'192.168.0.10', 500, 9912 ) # make it! @home
         buffer = pointer(EX_BUFFER( b'192.168.0.10', 1500, 9912 ) )# make it!
     
         self.interface = Interface
@@ -255,7 +266,7 @@ class Delib(object):
         elif self.interface == self.RO_ETH_LC: # low cost version has own id!
             try:
                 ## self.handle = 0 # for testing ONLY!
-                self.handle = self.bib.DapiOpenModuleEx(self.RO_ETH_LC, self.number,
+                self.handle = self.bib.DapiOpenModuleEx(self.interface, self.number,
                                             buffer, 0)      
                 # funktioniert!
                 #self.handle = self.bib.DapiOpenModule(self.interface, self.number)
@@ -334,8 +345,7 @@ class Delib(object):
         self.bib.DapiSpecialCommand.argtypes = \
                             [c_ulong, c_ulong, c_ulong, c_ulong, c_ulong]
         self.bib.DapiSpecialCommand.restype = c_ulong
-        
-        
+             
         ad_ch = self.bib.DapiSpecialCommand(self.handle, \
                             self.DAPI_SPECIAL_CMD_GET_MODULE_CONFIG,
                                 self.DAPI_SPECIAL_GET_MODULE_CONFIG_PAR_AD,0,0)
@@ -941,7 +951,7 @@ class Delib(object):
         if Width == None or Width == 48:
             # python int is big enough
             # gives the register map back
-            # 0100000010010000 000000000000000000000000111111111111111111111110
+            # ‭0100000010010000 000000000000000000000000111111111111111111111110‬
             # register        - here the counter: you must mask! 
             value = self.bib.DapiCnt48CounterGet48(self.handle, Channel)
         elif Width == 32:
